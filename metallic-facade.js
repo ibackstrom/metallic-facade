@@ -90,14 +90,24 @@ void main() {
   // Fake studio reflection: map the reflected ray to a vertical tonal ramp
   // (dark below -> bright above) with a bright horizon band, so the relief
   // reads as polished metal — deep recesses, hot highlights, full range.
-  vec3  refl  = reflect(-viewDir, normal);
-  float g     = clamp(refl.y, -1.0, 1.0);
-  float body  = smoothstep(-0.6, 0.6, g);
-  vec3  silver = mix(vec3(0.06, 0.06, 0.08), vec3(0.92, 0.94, 1.0), body);
-  // bright "studio horizon" sweep — sits ABOVE the flat mid-tone so flat
-  // areas stay mid-silver and only upward-facing curves catch the hot band.
-  silver += vec3(0.5) * exp(-pow((g - 0.35) / 0.13, 2.0));
-  float glint = pow(max(dot(normal, halfVec), 0.0), 40.0);    // moving hot spots
+  vec3  N    = normal;
+  vec3  refl = reflect(-viewDir, N);
+  float v    = clamp(refl.y, -1.0, 1.0);
+
+  // Vertical tonal ramp: flat surfaces land mid-silver, dark floor -> cool sky.
+  float t = clamp(v * 0.5 + 0.5, 0.0, 1.0);
+  vec3  silver = mix(vec3(0.05, 0.05, 0.07), vec3(0.90, 0.93, 1.00), t);
+  // Two crisp studio light strips give the liquid-chrome sparkle.
+  silver += vec3(0.55) * exp(-pow((v - 0.33) / 0.10, 2.0));   // key band
+  silver += vec3(0.18) * exp(-pow((v + 0.45) / 0.16, 2.0));   // fill band
+  // Fresnel rim — grazing angles glow, like a metallic edge sheen.
+  float fres = pow(1.0 - max(dot(N, viewDir), 0.0), 3.0);
+  silver += vec3(0.45) * fres;
+  // Cavity / AO from the albedo darkness deepens the carved recesses.
+  float ao = smoothstep(0.10, 0.55, dot(baseColor.rgb, vec3(0.3333)));
+  silver *= mix(0.6, 1.0, ao);
+  // Sharp moving glint that tracks the cursor light.
+  float glint = pow(max(dot(N, halfVec), 0.0), 60.0);
   silver += uLightColor * glint * uSpecular;
   vec3  metallicColor = clamp(silver, 0.0, 1.0);
 

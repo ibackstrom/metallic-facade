@@ -66,6 +66,19 @@ Tuning flags (defaults in parentheses):
 | `--fine`    | `1.5`| Blur radius for detail. Smaller = sharper hair/beard lines. |
 | `--broad-w` | `28` | How strongly the broad form bends the surface (chrome drama). |
 | `--fine-w`  | `5`  | How strongly fine detail shows up. |
+| `--flatten` | `0`  | High-pass radius. **Use ~30–48 for real museum photos** of weathered/stained marble: it removes lighting gradients and stains that would otherwise become "molten" waves on flat surfaces. Leave `0` for clean digital reliefs. |
+
+Example — a real (weathered, side-lit) museum photo cleaned up to polished cast silver:
+
+```bash
+python scripts/gen-normal.py relief.png relief-normal.png \
+    --flatten 42 --broad 10 --fine 3 --broad-w 28 --fine-w 2
+```
+
+> **Source matters most.** A *clean, evenly-lit, frontal* relief (or a digital
+> render) gives crisp polished chrome. A weathered, side-lit marble photo carries
+> its surface pitting and lighting into the normals — `--flatten` and heavier
+> blur tame it, but a clean source always wins.
 
 Example — punchier, deeper relief:
 
@@ -170,12 +183,15 @@ Inside the fragment shader (`FRAG` in `metallic-facade.js`):
    `normal = normalize(texture(uNormalMap, vUv).rgb * 2.0 - 1.0)`.
 2. **Reveal mask** — `cursorAtten` is a soft circle around the cursor
    (`lightRadius`) multiplied by the hover fade. 0 away from the cursor, 1 on it.
-3. **Chrome colour** — a *fake studio reflection*: the reflected ray's vertical
-   component `g` drives a tonal ramp (dark below → bright above) with a bright
-   "horizon" sweep, plus a sharp `pow(dot(normal, halfVec), 40)` glint. This
-   gives the full near-black → white range that reads as polished silver. Crucially
-   it **replaces** the base colour instead of brightening it (that was the old
-   washed-out bug).
+3. **Chrome colour** — a *fake studio reflection* sampled by the reflection
+   vector: a vertical tonal ramp (flat → mid-silver, dark floor → cool sky) with
+   two crisp light strips (**key + fill**) for sparkle, a **Fresnel rim** that
+   glows at grazing angles, a **cavity/AO** term (from the albedo's darkness)
+   that deepens recesses, and a sharp `pow(dot(normal, halfVec), 60)` glint that
+   tracks the cursor. This gives the full near-black → white range that reads as
+   polished silver. Crucially it **replaces** the base colour instead of
+   brightening it (that was the old washed-out bug). The albedo is therefore used
+   twice: as the resting image *and* to drive the cavity shadows of the metal.
 4. **Blend**: `finalColor = mix(baseColor, chrome, cursorAtten)` — matte plaster
    everywhere, melting into silver where the cursor is.
 

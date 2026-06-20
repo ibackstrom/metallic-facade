@@ -62,10 +62,19 @@ def main():
     ap.add_argument("--fine", type=float, default=1.5, help="fine blur sigma")
     ap.add_argument("--broad-w", type=float, default=28.0, help="broad weight")
     ap.add_argument("--fine-w", type=float, default=5.0, help="fine weight")
+    ap.add_argument("--flatten", type=float, default=0.0,
+                    help="high-pass sigma: removes lighting gradients & big "
+                         "stains so flat areas stay flat (0 = off; ~30-40 for "
+                         "real museum photos)")
     args = ap.parse_args()
 
     img = Image.open(args.src).convert("RGB")
     lum = np.asarray(img.convert("L"), dtype=np.float32) / 255.0
+
+    # High-pass: subtract a very broad blur to kill slow lighting/stain waves
+    # that would otherwise become fake molten geometry on flat surfaces.
+    if args.flatten > 0:
+        lum = lum - blur(lum, args.flatten)
 
     gx_b, gy_b = grad(blur(lum, args.broad))
     gx_f, gy_f = grad(blur(lum, args.fine))
