@@ -90,6 +90,27 @@ the subject's form).
 > A real, authored normal map of *your subject* always looks best. The generated
 > one (Option A) is a convincing approximation from a single photo.
 
+### Option C — combine subject form + a detail texture (recommended for "one image + a separate normal map")
+
+If you have **one base image** and a **separate, unrelated normal map** (e.g. a
+tiling pebble/hammered map), don't just swap it in — that *replaces* the
+subject's shape and the figures disappear. Instead blend the subject's own form
+(Option A) with the detail map so the subject stays and gains a metal texture:
+
+```bash
+# 1. form normal from the image
+python scripts/gen-normal.py relief.png relief-normal.png
+# 2. blend in the detail texture
+python scripts/combine-normals.py relief-normal.png pebbles-normal.jpg \
+    relief-normal-combined.png --detail 0.18 --tile 3.0
+# 3. point index.html at relief-normal-combined.png
+```
+
+| Flag | Default | Effect |
+|------|---------|--------|
+| `--detail` | `0.6` | Texture strength. **Keep it low (~0.15–0.25)** or the texture drowns the subject. |
+| `--tile`   | `2.0` | How many times the detail repeats across the width (bigger = smaller bumps). |
+
 ---
 
 ## 3. Wire the textures into the page
