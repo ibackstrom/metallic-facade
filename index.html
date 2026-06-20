@@ -10,8 +10,8 @@
     background: #e7e6e2;
   }
   .stage {
-    width: min(86vw, 560px);
-    aspect-ratio: 2523 / 3687;
+    width: min(90vw, 680px);
+    aspect-ratio: 1 / 1;
     overflow: hidden;
     cursor: crosshair;
   }
@@ -20,10 +20,9 @@
 <body>
   <div class="stage" id="stage"></div>
   <!--
-    Base image: "The Great Eleusinian Relief" (Roman copy of a Greek original),
-    The Metropolitan Museum of Art — Public Domain (CC0). Free for commercial use.
-    https://www.metmuseum.org/art/collection/search/248899
-    Normal map generated with scripts/gen-normal.py.
+    Textures: "Concrete Block Wall 03" from Poly Haven — CC0 (public domain).
+    Albedo = *_diff, normal map = *_nor_gl (EXR converted to PNG).
+    https://polyhaven.com/a/concrete_block_wall_03
   -->
   <script type="module">
     import MetallicFacade from './metallic-facade.js';

@@ -103,6 +103,27 @@ the subject's form).
 > A real, authored normal map of *your subject* always looks best. The generated
 > one (Option A) is a convincing approximation from a single photo.
 
+#### Using a full PBR set (e.g. Poly Haven / ambientCG, CC0)
+
+These ship an **albedo** (`*_diff`) and a real **normal map** (`*_nor_gl` =
+OpenGL/Y-up, which is what this shader expects). Use `diff` as the `image` and the
+normal as `normalMap` — this is the highest-quality, lowest-effort route.
+
+If the normal is an `.exr` (float), convert it to PNG once (the browser can't load
+EXR):
+
+```python
+import os; os.environ['OPENCV_IO_ENABLE_OPENEXR'] = '1'
+import cv2, numpy as np
+from PIL import Image
+exr = cv2.imread('wall_nor_gl_1k.exr', cv2.IMREAD_UNCHANGED)        # BGR float
+rgb = cv2.cvtColor(exr, cv2.COLOR_BGR2RGB)
+Image.fromarray(np.clip(rgb * 255 + 0.5, 0, 255).astype('uint8')).save('relief-normal.png')
+```
+
+Use `*_nor_gl` (OpenGL), **not** `*_nor_dx` (DirectX) — the DX one has its green
+channel flipped and the lighting will look inverted.
+
 ### Option C — combine subject form + a detail texture (recommended for "one image + a separate normal map")
 
 If you have **one base image** and a **separate, unrelated normal map** (e.g. a
