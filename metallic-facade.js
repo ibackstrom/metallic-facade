@@ -190,7 +190,7 @@ class MetallicFacade {
 
     this._lastT = performance.now();
     this._loop = this._loop.bind(this);
-    requestAnimationFrame(this._loop);
+    this._raf = requestAnimationFrame(this._loop);
   }
 
   _compile(type, src) {
@@ -331,10 +331,29 @@ class MetallicFacade {
       this.targetCursor.x = (clientX - r.left) / r.width;
       this.targetCursor.y = 1 - (clientY - r.top) / r.height; // y up
     };
-    this.canvas.addEventListener('pointermove', e => move(e.clientX, e.clientY));
-    this.canvas.addEventListener('pointerenter', () => { this.targetHover = 1; });
-    this.canvas.addEventListener('pointerleave', () => { this.targetHover = 0; });
-    window.addEventListener('resize', () => this._resize());
+    this._handlers = {
+      move: e => move(e.clientX, e.clientY),
+      enter: () => { this.targetHover = 1; },
+      leave: () => { this.targetHover = 0; },
+      resize: () => this._resize(),
+    };
+    this.canvas.addEventListener('pointermove', this._handlers.move);
+    this.canvas.addEventListener('pointerenter', this._handlers.enter);
+    this.canvas.addEventListener('pointerleave', this._handlers.leave);
+    window.addEventListener('resize', this._handlers.resize);
+  }
+
+  // Stop the render loop, remove listeners, and detach the canvas. Call this
+  // when unmounting in a framework (React effect cleanup, Vue onUnmounted, …).
+  destroy() {
+    cancelAnimationFrame(this._raf);
+    if (this._handlers) {
+      this.canvas.removeEventListener('pointermove', this._handlers.move);
+      this.canvas.removeEventListener('pointerenter', this._handlers.enter);
+      this.canvas.removeEventListener('pointerleave', this._handlers.leave);
+      window.removeEventListener('resize', this._handlers.resize);
+    }
+    if (this.canvas.parentNode) this.canvas.parentNode.removeChild(this.canvas);
   }
 
   _resize() {
