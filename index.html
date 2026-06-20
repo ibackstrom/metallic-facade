@@ -20,15 +20,17 @@
 <body>
   <div class="stage" id="stage"></div>
   <!--
-    Textures: "Concrete Block Wall 03" from Poly Haven — CC0 (public domain).
-    Albedo = *_diff, normal map = *_nor_gl (EXR converted to PNG).
-    https://polyhaven.com/a/concrete_block_wall_03
+    Textures: "Stone Tiles" from Poly Haven — CC0 (public domain).
+    color = *_ao, normal = *_nor_gl, roughness = *_rough, displacement = *_disp.
+    https://polyhaven.com/a/stone_tiles
   -->
   <script type="module">
     import MetallicFacade from './metallic-facade.js';
     new MetallicFacade(document.getElementById('stage'), {
       image: 'relief.png',
       normalMap: 'relief-normal.png',
+      roughnessMap: 'relief-rough.png',
+      dispMap: 'relief-disp.png',
       metallic: 0.95,
       ambientLight: 0.5,
       lightRadius: 1.7,

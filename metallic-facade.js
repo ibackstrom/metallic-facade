@@ -33,6 +33,8 @@ precision highp float;
 
 uniform sampler2D uBaseTexture;
 uniform sampler2D uNormalMap;
+uniform sampler2D uRoughnessMap;     // r = roughness (0 mirror .. 1 matte)
+uniform sampler2D uDispMap;          // r = height (0 recess .. 1 peak)
 
 uniform vec2  uCursorPos;            // 0..1, y up
 uniform float uAspectRatio;
@@ -59,6 +61,11 @@ void main() {
 
   // Normal map → surface normal (the fake 3D relief of the "models")
   vec3 normal = normalize(texture(uNormalMap, vUv).rgb * 2.0 - 1.0);
+
+  // PBR helper maps
+  float rough  = texture(uRoughnessMap, vUv).r;   // 0 mirror .. 1 matte
+  float gloss  = 1.0 - rough;
+  float height = texture(uDispMap, vUv).r;        // 0 recess .. 1 peak
 
   vec3 viewDir = vec3(0.0, 0.0, 1.0);
 
@@ -97,18 +104,27 @@ void main() {
   // Vertical tonal ramp: flat surfaces land mid-silver, dark floor -> cool sky.
   float t = clamp(v * 0.5 + 0.5, 0.0, 1.0);
   vec3  silver = mix(vec3(0.05, 0.05, 0.07), vec3(0.90, 0.93, 1.00), t);
-  // Two crisp studio light strips give the liquid-chrome sparkle.
-  silver += vec3(0.55) * exp(-pow((v - 0.33) / 0.10, 2.0));   // key band
-  silver += vec3(0.18) * exp(-pow((v + 0.45) / 0.16, 2.0));   // fill band
+  // Two studio light strips give the sparkle. ROUGHNESS widens & dims them
+  // (glossy = tight bright bands = mirror; rough = broad soft = brushed metal).
+  float kw = mix(0.30, 0.09, gloss);
+  silver += vec3(mix(0.22, 0.6, gloss)) * exp(-pow((v - 0.33) / kw, 2.0));   // key
+  silver += vec3(mix(0.10, 0.2, gloss)) * exp(-pow((v + 0.45) / (kw * 1.6), 2.0)); // fill
   // Fresnel rim — grazing angles glow, like a metallic edge sheen.
   float fres = pow(1.0 - max(dot(N, viewDir), 0.0), 3.0);
   silver += vec3(0.45) * fres;
-  // Cavity / AO from the albedo darkness deepens the carved recesses.
-  float ao = smoothstep(0.10, 0.55, dot(baseColor.rgb, vec3(0.3333)));
-  silver *= mix(0.6, 1.0, ao);
-  // Sharp moving glint that tracks the cursor light.
-  float glint = pow(max(dot(N, halfVec), 0.0), 60.0);
-  silver += uLightColor * glint * uSpecular;
+  // ROUGHNESS dulls reflection contrast (rough metal reflects less sharply).
+  float lum = dot(silver, vec3(0.299, 0.587, 0.114));
+  silver = mix(vec3(lum), silver, mix(0.5, 1.0, gloss));
+  // Cavity / AO: combine the albedo darkness with the DISPLACEMENT height so
+  // recessed tiles/mortar go dark and raised faces stay bright.
+  float ao     = smoothstep(0.10, 0.55, dot(baseColor.rgb, vec3(0.3333)));
+  float cavity = smoothstep(0.12, 0.72, height);
+  silver *= mix(0.5, 1.0, ao) * mix(0.55, 1.0, cavity);
+  // Raised faces catch a touch more light (DISPLACEMENT peaks).
+  silver += vec3(0.12) * smoothstep(0.6, 1.0, height) * gloss;
+  // Sharp moving glint that tracks the cursor light; ROUGHNESS softens it.
+  float glint = pow(max(dot(N, halfVec), 0.0), mix(10.0, 140.0, gloss));
+  silver += uLightColor * glint * uSpecular * mix(0.25, 1.3, gloss);
   vec3  metallicColor = clamp(silver, 0.0, 1.0);
 
   // ---- Reveal: matte -> chrome near the cursor, fading with hover ----
@@ -131,6 +147,8 @@ const FRAG1 = FRAG
 const DEFAULTS = {
   image: null,
   normalMap: null,        // if null, generated from the image
+  roughnessMap: null,     // optional: r = roughness (0 mirror .. 1 matte)
+  dispMap: null,          // optional: r = height (0 recess .. 1 peak)
   lightIntensity: 0.4,
   ambientLight: 0.5,      // brighter than the site (0.06) so the base is visible
   lightRadius: 1.5,
@@ -206,7 +224,8 @@ class MetallicFacade {
 
     this.u = {};
     [
-      'uBaseTexture', 'uNormalMap', 'uCursorPos', 'uAspectRatio', 'uHover',
+      'uBaseTexture', 'uNormalMap', 'uRoughnessMap', 'uDispMap',
+      'uCursorPos', 'uAspectRatio', 'uHover',
       'uLightColor', 'uLightIntensity', 'uAmbientLight', 'uCursorAmbient',
       'uLightRadius', 'uSpecular', 'uMetallic', 'uCursorLightAngle',
       'uCursorDirFollowsCursor',
@@ -236,9 +255,15 @@ class MetallicFacade {
   }
 
   _loadTextures() {
-    const gl = this.gl;
     this.baseTex = this._placeholderTexture([200, 200, 200, 255]);
     this.normalTex = this._placeholderTexture([128, 128, 255, 255]);
+    // defaults: mid roughness (0.4) and flat height (0.5) when no map supplied
+    this.roughTex = this._placeholderTexture([102, 102, 102, 255]);
+    this.dispTex = this._placeholderTexture([128, 128, 128, 255]);
+
+    // optional helper maps
+    this._loadInto(this.roughTex, this.cfg.roughnessMap);
+    this._loadInto(this.dispTex, this.cfg.dispMap);
 
     if (!this.cfg.image) return;
     const img = new Image();
@@ -249,16 +274,21 @@ class MetallicFacade {
       this._uploadTexture(this.baseTex, img);
 
       if (this.cfg.normalMap) {
-        const n = new Image();
-        n.crossOrigin = 'anonymous';
-        n.onload = () => this._uploadTexture(this.normalTex, n);
-        n.src = this.cfg.normalMap;
+        this._loadInto(this.normalTex, this.cfg.normalMap);
       } else {
         this._uploadTexture(this.normalTex,
           this._generateNormalMap(img, this.cfg.normalStrength));
       }
     };
     img.src = this.cfg.image;
+  }
+
+  _loadInto(tex, url) {
+    if (!url) return;
+    const im = new Image();
+    im.crossOrigin = 'anonymous';
+    im.onload = () => this._uploadTexture(tex, im);
+    im.src = url;
   }
 
   // Build a normal map from the image's luminance using a Sobel filter.
@@ -338,6 +368,12 @@ class MetallicFacade {
     gl.activeTexture(gl.TEXTURE1);
     gl.bindTexture(gl.TEXTURE_2D, this.normalTex);
     gl.uniform1i(u.uNormalMap, 1);
+    gl.activeTexture(gl.TEXTURE2);
+    gl.bindTexture(gl.TEXTURE_2D, this.roughTex);
+    gl.uniform1i(u.uRoughnessMap, 2);
+    gl.activeTexture(gl.TEXTURE3);
+    gl.bindTexture(gl.TEXTURE_2D, this.dispTex);
+    gl.uniform1i(u.uDispMap, 3);
 
     gl.uniform2f(u.uCursorPos, this.cursor.x, this.cursor.y);
     gl.uniform1f(u.uAspectRatio, this.aspect || 1);

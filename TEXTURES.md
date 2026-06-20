@@ -124,6 +124,30 @@ Image.fromarray(np.clip(rgb * 255 + 0.5, 0, 255).astype('uint8')).save('relief-n
 Use `*_nor_gl` (OpenGL), **not** `*_nor_dx` (DirectX) — the DX one has its green
 channel flipped and the lighting will look inverted.
 
+You can also wire in the **roughness** and **displacement** maps for extra realism
+(`roughnessMap` makes some areas satin and others mirror; `dispMap` darkens the
+crevices and lifts raised faces):
+
+```python
+# roughness EXR (single channel float) -> grayscale PNG
+r = cv2.imread('rough_1k.exr', cv2.IMREAD_UNCHANGED)
+if r.ndim == 3: r = r[..., 0]
+Image.fromarray(np.clip(r * 255 + 0.5, 0, 255).astype('uint8'), 'L').save('relief-rough.png')
+
+# displacement is often a 16-bit PNG -> normalize to 8-bit (don't just convert('L'),
+# that clips!)
+a = np.asarray(Image.open('disp_1k.png')).astype(np.float32)
+a = (a - a.min()) / (a.max() - a.min())
+Image.fromarray((a * 255 + 0.5).astype('uint8'), 'L').save('relief-disp.png')
+```
+
+```js
+new MetallicFacade(el, {
+  image: 'relief.png', normalMap: 'relief-normal.png',
+  roughnessMap: 'relief-rough.png', dispMap: 'relief-disp.png',
+});
+```
+
 ### Option C — combine subject form + a detail texture (recommended for "one image + a separate normal map")
 
 If you have **one base image** and a **separate, unrelated normal map** (e.g. a
@@ -184,6 +208,8 @@ quick look, but the offline script (Option A) is higher quality.
 |--------|---------|---------|
 | `image` | `null` | Base image URL (required). |
 | `normalMap` | `null` | Normal map URL; auto-generated from `image` if omitted. |
+| `roughnessMap` | `null` | Optional. `r` channel: 0 = mirror, 1 = matte. Varies the reflection sharpness per pixel (satin vs polished). |
+| `dispMap` | `null` | Optional. `r` channel height: 0 = recess, 1 = peak. Darkens crevices and lifts raised faces. |
 | `metallic` | `0.85` | 0 = matte, 1 = full chrome under the cursor. |
 | `lightRadius` | `1.5` | Size of the reveal around the cursor. |
 | `specular` | `1.1` | Strength of the sharp moving highlights. |
