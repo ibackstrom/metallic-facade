@@ -83,25 +83,27 @@ void main() {
   float effCursorSpec    = cursorSpec * uSpecular * cursorAtten;
   float effCursorAmbient = uCursorAmbient * cursorAtten;
 
-  // Matte shading (Lambert + Phong)
-  vec3 matteColor = baseColor.rgb * (uAmbientLight + effCursorAmbient
-                  + effCursorDiff * uLightColor)
-                  + uLightColor * effCursorSpec;
+  // ---- Matte plaster (subtle) — keeps the un-revealed look as the image ----
+  vec3 matteColor = baseColor.rgb + uLightColor * effCursorSpec * 0.4;
 
-  // Metallic shading — sharper, stronger highlight, tinted by base color
-  float effMetalSpec = cursorSpecMtl * uLightIntensity * 2.0 * cursorAtten;
-  float effMetalDiff = cursorDiff    * uLightIntensity * 0.25 * cursorAtten;
-  vec3  metalHighlight = mix(uLightColor * effMetalSpec,
-                             baseColor.rgb * effMetalSpec, 0.75);
-  vec3  metallicColor  = baseColor.rgb * (uAmbientLight + effCursorAmbient
-                       + effMetalDiff * uLightColor)
-                       + metalHighlight;
+  // ---- Chrome / liquid silver -------------------------------------------
+  // Fake studio reflection: map the reflected ray to a vertical tonal ramp
+  // (dark below -> bright above) with a bright horizon band, so the relief
+  // reads as polished metal — deep recesses, hot highlights, full range.
+  vec3  refl  = reflect(-viewDir, normal);
+  float g     = clamp(refl.y, -1.0, 1.0);
+  float body  = smoothstep(-0.6, 0.6, g);
+  vec3  silver = mix(vec3(0.06, 0.06, 0.08), vec3(0.92, 0.94, 1.0), body);
+  // bright "studio horizon" sweep — sits ABOVE the flat mid-tone so flat
+  // areas stay mid-silver and only upward-facing curves catch the hot band.
+  silver += vec3(0.5) * exp(-pow((g - 0.35) / 0.13, 2.0));
+  float glint = pow(max(dot(normal, halfVec), 0.0), 40.0);    // moving hot spots
+  silver += uLightColor * glint * uSpecular;
+  vec3  metallicColor = clamp(silver, 0.0, 1.0);
 
-  vec3 lit = clamp(mix(matteColor, metallicColor, uMetallic), 0.0, 1.0);
-
-  // Blend the lit (metallic) result over the plain image by hover amount,
-  // strongest near the cursor.
-  vec3 finalColor = mix(baseColor.rgb, lit, clamp(uHover, 0.0, 1.0));
+  // ---- Reveal: matte -> chrome near the cursor, fading with hover ----
+  vec3 revealed   = mix(matteColor, metallicColor, uMetallic);
+  vec3 finalColor = mix(baseColor.rgb, revealed, cursorAtten);
 
   fragColor = vec4(finalColor, 1.0);
 }`;
