@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Metallic Facade — hover effect</title>
+<style>
+  :root { color-scheme: dark; }
+  body {
+    margin: 0; min-height: 100vh; display: grid; place-items: center;
+    background: #dddcd7; font-family: system-ui, sans-serif;
+  }
+  .stage {
+    width: min(80vw, 520px);
+    aspect-ratio: 498 / 1050;   /* matches the temple-facade proportions */
+    border-radius: 12px; overflow: hidden;
+    box-shadow: 0 30px 80px rgba(0,0,0,.25);
+    cursor: crosshair;
+  }
+  .hint { position: fixed; top: 16px; left: 0; right: 0; text-align: center;
+          color: #555; font-size: 14px; }
+</style>
+</head>
+<body>
+  <div class="hint">Move your cursor over the image — it turns metallic.</div>
+  <div class="stage" id="stage"></div>
+
+  <script type="module">
+    import MetallicFacade from './metallic-facade.js';
+
+    new MetallicFacade(document.getElementById('stage'), {
+      // Put your own facade/model image here. A normal map is auto-generated
+      // from it, but supplying a real one (normalMap: '...') looks much better.
+      image: 'facade.svg',
+      // normalMap: 'facade-normal.jpg',
+      metallic: 0.9,
+      ambientLight: 0.55,
+      lightRadius: 1.4,
+      specular: 1.2,
+      normalStrength: 2.5,
+    });
+  </script>
+</body>
+</html>

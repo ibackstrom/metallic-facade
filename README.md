@@ -1,15 +1,73 @@
 # Metallic Facade
 
-An interactive **matte → metallic hover effect** for images, reproduced from
+Interactive **matte → metallic hover effects**, reproduced from
 [week.wild.plus/athens-26](https://week.wild.plus/athens-26).
+
+**[▶ Live demo](https://ibackstrom.github.io/metallic-facade/)**
+
+There are two versions:
+
+| Version | What it is | Page |
+|---------|-----------|------|
+| **3D model** | A real GLTF model (Three.js) that turns to chrome on hover, with true environment reflections. Drag to rotate, scroll to zoom. | [`statue.html`](statue.html) |
+| **2D image** | The original site's technique — a flat image + normal map lit by a cursor-following light. Zero dependencies. | [`facade.html`](facade.html) |
+
+---
+
+## 3D model version (use your own model)
+
+![3D statue going chrome](statue-after.png)
+
+A flat image only fakes depth; this version renders an actual 3D model so the
+metal reflects a real environment from every angle.
+
+### Quick start
+
+```html
+<div id="stage" style="width: 560px; height: 720px;"></div>
+
+<!-- Three.js via CDN -->
+<script type="importmap">
+{ "imports": {
+  "three": "https://cdn.jsdelivr.net/npm/three@0.169.0/build/three.module.js",
+  "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.169.0/examples/jsm/"
+} }
+</script>
+<script type="module">
+  import MetallicStatue from './statue.js';
+  new MetallicStatue(document.getElementById('stage'), {
+    model: 'model/scene.gltf',   // path to YOUR .gltf / .glb
+  });
+</script>
+```
+
+Put your model anywhere and point `model` at its `.gltf` or `.glb`. The component
+auto-centers and frames it, adds an environment map for reflections, and morphs
+the material from matte to chrome on hover.
+
+### Options ([`statue.js`](statue.js))
+
+| Option | Default | Meaning |
+|--------|---------|---------|
+| `model` | `'model/scene.gltf'` | Path to your `.gltf`/`.glb`. |
+| `matteMetalness` / `matteRoughness` | `0.0` / `0.85` | Material when **not** hovered. |
+| `chromeMetalness` / `chromeRoughness` | `1.0` / `0.06` | Material when hovered. |
+| `envIntensity` | `1.0` | Strength of the reflected environment. |
+| `autoRotateSpeed` | `0.3` | Idle spin speed (rad/s). |
+| `fadeSpeed` | `4` | How fast it morphs matte ⇄ chrome. |
+| `background` | `0x111317` | Scene background color. |
+
+> How it works is explained in [HOW-IT-WORKS.md](HOW-IT-WORKS.md#7-the-3d-model-version).
+
+---
+
+## 2D image version
+
+![2D effect preview](preview.png)
 
 Move your cursor over an image and a light follows it, lighting up the surface
 with chrome-like specular highlights. A **normal map** gives the flat image fake
 3D relief, so columns, statues, and facades appear to catch the light.
-
-**[▶ Live demo](https://ibackstrom.github.io/metallic-facade/)**
-
-![effect preview](preview.png)
 
 - Zero dependencies, ~9 KB of vanilla JavaScript
 - Raw WebGL2 (with a WebGL1 fallback)
@@ -117,10 +175,13 @@ Then open the printed URL.
 
 | File | Purpose |
 |------|---------|
-| [`index.html`](index.html)             | Demo page. |
-| [`metallic-facade.js`](metallic-facade.js) | The effect (the only file you need). |
+| [`index.html`](index.html)             | Landing page linking both demos. |
+| [`statue.html`](statue.html) / [`statue.js`](statue.js) | **3D model** version (Three.js). |
+| [`model/`](model)                      | The GLTF statue used by the 3D demo. |
+| [`facade.html`](facade.html)           | **2D image** demo page. |
+| [`metallic-facade.js`](metallic-facade.js) | The 2D effect (the only file you need for it). |
 | [`facade.svg`](facade.svg)             | Sample Greek-temple facade image. |
-| [`HOW-IT-WORKS.md`](HOW-IT-WORKS.md)   | Detailed technical explanation. |
+| [`HOW-IT-WORKS.md`](HOW-IT-WORKS.md)   | Detailed technical explanation of both. |
 
 ---
 
@@ -129,3 +190,8 @@ Then open the printed URL.
 The effect and its GLSL shader were reverse-engineered from the Framer site
 [week.wild.plus/athens-26](https://week.wild.plus/athens-26) for educational
 purposes.
+
+The 3D demo uses **“Ibex Statue Scan - Berlin - Tierpark”** by
+[Christian Rambow](https://sketchfab.com/art-3d.com), licensed
+[CC-BY-NC-4.0](http://creativecommons.org/licenses/by-nc/4.0/). If you reuse it,
+keep the credit and don't use it commercially.

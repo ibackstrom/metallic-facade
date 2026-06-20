@@ -273,3 +273,99 @@ left out here to keep the component small and dependency-free:
 
 The lighting math (diffuse, specular, matte vs metallic mix, tinted metal
 highlight) is taken directly from the original fragment shader.
+
+---
+
+## 7. The 3D-model version
+
+The 2D shader above only *fakes* depth. The file [`statue.js`](statue.js) does it
+for real: it renders an actual GLTF model with **Three.js** and switches the
+material from matte to chrome on hover. Because it's true 3D, the metal reflects a
+real environment from every angle, and you can orbit and zoom it.
+
+### 7.1 Why you need an environment map
+
+A perfect mirror shows *its surroundings* — so a metallic material is only as
+interesting as what's around it. With nothing to reflect, full metal just looks
+black. So before loading the model we build an environment:
+
+```js
+const pmrem = new THREE.PMREMGenerator(renderer);
+scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
+```
+
+`RoomEnvironment` is a small procedural "room" of soft light panels.
+`PMREMGenerator` pre-filters it into the specially blurred mip-chain that
+Three.js's PBR materials use for reflections at every roughness level. Assigning
+it to `scene.environment` makes **every** material reflect it automatically.
+
+### 7.2 Taking control of the material
+
+Scanned models ship with a *packed* `metallicRoughness` texture (metalness in the
+blue channel, roughness in green). If we left it in place, Three.js would compute
+`finalMetalness = material.metalness * texture.b`. A stone scan has near-zero
+metalness in that texture, so no scalar we set would ever make it shiny.
+
+So when the model loads we strip those maps and drive the values from code,
+keeping only the colour and normal maps (which give the statue its look and
+surface detail):
+
+```js
+root.traverse((o) => {
+  if (!o.isMesh) return;
+  o.material.metalnessMap = null;   // ignore packed metalness…
+  o.material.roughnessMap = null;   // …and roughness
+  o.material.envMapIntensity = 1.0;
+  materials.push(o.material);
+});
+```
+
+### 7.3 Auto-centering and framing
+
+Models come in arbitrary positions, scales, and orientations. We measure the
+bounding box, move the model so its center sits at the origin, then push the
+camera back far enough that the whole thing fits the vertical field of view:
+
+```js
+const box  = new THREE.Box3().setFromObject(root);
+const size = box.getSize(new THREE.Vector3());
+root.position.sub(box.getCenter(new THREE.Vector3()));   // recenter
+
+const maxDim = Math.max(size.x, size.y, size.z);
+const dist   = (maxDim / 2) / Math.tan((camera.fov * Math.PI / 180) / 2) * 1.4;
+camera.position.set(0, size.y * 0.05, dist);
+```
+
+The model is then parented to a `pivot` group so we can spin it without disturbing
+the camera or the `OrbitControls`.
+
+### 7.4 The hover morph
+
+Exactly like the 2D version, a smoothed `hover` value eases between `0` and `1`.
+Every frame it linearly interpolates each material's metalness and roughness:
+
+```js
+hover += (targetHover - hover) * (1 - Math.exp(-fadeSpeed * dt));
+
+for (const m of materials) {
+  m.metalness = lerp(matteMetalness, chromeMetalness, hover); // 0.0 → 1.0
+  m.roughness = lerp(matteRoughness, chromeRoughness, hover); // 0.85 → 0.06
+}
+```
+
+- **Low metalness + high roughness** → a dull, diffuse stone surface lit by the
+  scene lights.
+- **High metalness + low roughness** → a near-perfect mirror that reflects the
+  environment map. The colour map tints those reflections, so the chrome takes on
+  the statue's hue rather than looking like plain steel.
+
+Because Three.js's `MeshStandardMaterial` is physically based, simply animating
+these two numbers is all it takes to travel the entire range from matte to chrome
+— the reflections, Fresnel edge-brightening, and roughness blur all fall out of
+the PBR model for free.
+
+### 7.5 Interaction
+
+`OrbitControls` (with damping) lets the user drag to rotate and scroll to zoom.
+When idle the `pivot` slowly auto-rotates. On touch devices there is no hover, so
+a tap toggles the chrome state instead.
