@@ -49,7 +49,7 @@ uniform float uMetallic;             // 0 = matte, 1 = chrome
 uniform float uCursorLightAngle;     // radians
 uniform float uCursorDirFollowsCursor;
 
-const int TRAIL_MAX = 64;
+const int TRAIL_MAX = 32;
 uniform vec2  uTrail[TRAIL_MAX];     // recent cursor positions, 0..1
 uniform float uTrailStr[TRAIL_MAX];  // per-sample strength (1 = fresh, 0 = gone)
 uniform int   uTrailCount;
@@ -169,11 +169,11 @@ const DEFAULTS = {
   lightColor: [1, 1, 1],
   normalStrength: 1.0,    // used only when auto-generating the normal map
   fadeSpeed: 6,           // hover fade in/out speed
-  trailFade: 0.8,         // trail decay rate /s (higher = shorter, faster-fading trail)
+  trailFade: 1.6,         // trail decay rate /s (higher = shorter, faster-fading trail)
   trailSpacing: 0.018,    // min cursor travel (0..1) before dropping a new trail dot
 };
 
-const TRAIL_MAX = 64;     // must match TRAIL_MAX in the fragment shader
+const TRAIL_MAX = 32;     // must match TRAIL_MAX in the fragment shader
 
 class MetallicFacade {
   constructor(container, options = {}) {
