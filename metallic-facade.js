@@ -126,6 +126,13 @@ void main() {
   silver *= mix(0.5, 1.0, ao) * mix(0.55, 1.0, cavity);
   // Raised faces catch a touch more light (DISPLACEMENT peaks).
   silver += vec3(0.12) * smoothstep(0.6, 1.0, height) * gloss;
+  // ---- Cursor behaves like a moving light emitter on the metal ----
+  // Surface facing the cursor brightens, and a sharp highlight tracks it,
+  // so the metalness visibly reacts to where the cursor is.
+  float metalDiff = max(dot(N, lightDir), 0.0);
+  float metalSpec = pow(max(dot(N, halfVec), 0.0), mix(24.0, 120.0, gloss));
+  silver *= 0.55 + 0.75 * metalDiff * uLightIntensity * 2.0;
+  silver += uLightColor * metalSpec * uSpecular * mix(0.30, 0.85, gloss);
   // Punch up contrast inside the reveal: push darks down and brights up
   // around mid-grey so the chrome reads crisper.
   silver = clamp((silver - 0.5) * uMetalContrast + 0.5, 0.0, 1.0);
