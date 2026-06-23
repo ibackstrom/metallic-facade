@@ -90,8 +90,8 @@ void main() {
   float effCursorSpec    = cursorSpec * uSpecular * cursorAtten;
   float effCursorAmbient = uCursorAmbient * cursorAtten;
 
-  // ---- Matte plaster (subtle) — keeps the un-revealed look as the image ----
-  vec3 matteColor = baseColor.rgb + uLightColor * effCursorSpec * 0.4;
+  // ---- Matte plaster — the un-revealed look stays exactly as the image ----
+  vec3 matteColor = baseColor.rgb;
 
   // ---- Chrome / liquid silver -------------------------------------------
   // Fake studio reflection: map the reflected ray to a vertical tonal ramp
@@ -122,9 +122,6 @@ void main() {
   silver *= mix(0.5, 1.0, ao) * mix(0.55, 1.0, cavity);
   // Raised faces catch a touch more light (DISPLACEMENT peaks).
   silver += vec3(0.12) * smoothstep(0.6, 1.0, height) * gloss;
-  // Sharp moving glint that tracks the cursor light; ROUGHNESS softens it.
-  float glint = pow(max(dot(N, halfVec), 0.0), mix(10.0, 140.0, gloss));
-  silver += uLightColor * glint * uSpecular * mix(0.25, 1.3, gloss);
   vec3  metallicColor = clamp(silver, 0.0, 1.0);
 
   // ---- Reveal: matte -> chrome near the cursor, fading with hover ----
