@@ -48,6 +48,8 @@ uniform float uSpecular;
 uniform float uMetallic;             // 0 = matte, 1 = chrome
 uniform float uCursorLightAngle;     // radians
 uniform float uCursorDirFollowsCursor;
+uniform float uFeather;              // 0..1 softness of the mask edge
+uniform float uMetalContrast;        // contrast boost inside the reveal
 
 in vec2 vUv;
 out vec4 fragColor;
@@ -82,8 +84,10 @@ void main() {
   float cursorSpec    = pow(max(dot(normal, halfVec), 0.0), 64.0);
   float cursorSpecMtl = pow(max(dot(normal, halfVec), 0.0), 16.0);
 
-  // Light falls off with distance from the cursor, and fades with hover
-  float cursorAtten = (1.0 - smoothstep(0.0, uLightRadius, lightDist)) * uHover;
+  // Reveal mask: solid inside, with a narrow feathered edge near the radius.
+  // uFeather (0..1) sets how much of the radius is the soft band.
+  float featherStart = uLightRadius * (1.0 - uFeather);
+  float cursorAtten = (1.0 - smoothstep(featherStart, uLightRadius, lightDist)) * uHover;
   cursorAtten = clamp(cursorAtten, 0.0, 1.0);
 
   float effCursorDiff    = cursorDiff * uLightIntensity * cursorAtten;
@@ -122,6 +126,9 @@ void main() {
   silver *= mix(0.5, 1.0, ao) * mix(0.55, 1.0, cavity);
   // Raised faces catch a touch more light (DISPLACEMENT peaks).
   silver += vec3(0.12) * smoothstep(0.6, 1.0, height) * gloss;
+  // Punch up contrast inside the reveal: push darks down and brights up
+  // around mid-grey so the chrome reads crisper.
+  silver = clamp((silver - 0.5) * uMetalContrast + 0.5, 0.0, 1.0);
   vec3  metallicColor = clamp(silver, 0.0, 1.0);
 
   // ---- Reveal: matte -> chrome near the cursor, fading with hover ----
@@ -157,6 +164,8 @@ const DEFAULTS = {
   lightColor: [1, 1, 1],
   normalStrength: 1.0,    // used only when auto-generating the normal map
   fadeSpeed: 6,           // hover fade in/out speed
+  feather: 0.35,          // mask edge softness (0 = hard edge, 1 = fades from center)
+  metalContrast: 1.5,     // contrast boost inside the revealed metal (1 = none)
 };
 
 class MetallicFacade {
@@ -225,7 +234,7 @@ class MetallicFacade {
       'uCursorPos', 'uAspectRatio', 'uHover',
       'uLightColor', 'uLightIntensity', 'uAmbientLight', 'uCursorAmbient',
       'uLightRadius', 'uSpecular', 'uMetallic', 'uCursorLightAngle',
-      'uCursorDirFollowsCursor',
+      'uCursorDirFollowsCursor', 'uFeather', 'uMetalContrast',
     ].forEach(n => this.u[n] = gl.getUniformLocation(prog, n));
   }
 
@@ -403,6 +412,8 @@ class MetallicFacade {
     gl.uniform1f(u.uMetallic, c.metallic);
     gl.uniform1f(u.uCursorLightAngle, c.cursorLightAngle * Math.PI / 180);
     gl.uniform1f(u.uCursorDirFollowsCursor, c.cursorDirFollowsCursor);
+    gl.uniform1f(u.uFeather, c.feather);
+    gl.uniform1f(u.uMetalContrast, c.metalContrast);
 
     gl.drawArrays(gl.TRIANGLES, 0, 3);
   }
