@@ -49,11 +49,6 @@ uniform float uMetallic;             // 0 = matte, 1 = chrome
 uniform float uCursorLightAngle;     // radians
 uniform float uCursorDirFollowsCursor;
 
-const int TRAIL_MAX = 32;
-uniform vec2  uTrail[TRAIL_MAX];     // recent cursor positions, 0..1
-uniform float uTrailStr[TRAIL_MAX];  // per-sample strength (1 = fresh, 0 = gone)
-uniform int   uTrailCount;
-
 in vec2 vUv;
 out vec4 fragColor;
 
@@ -87,16 +82,9 @@ void main() {
   float cursorSpec    = pow(max(dot(normal, halfVec), 0.0), 64.0);
   float cursorSpecMtl = pow(max(dot(normal, halfVec), 0.0), 16.0);
 
-  // Reveal mask = the brightest of all recent cursor positions, so the
-  // effect leaves a trail behind the cursor that fades away over time.
-  float cursorAtten = 0.0;
-  for (int i = 0; i < TRAIL_MAX; i++) {
-    if (i >= uTrailCount) break;
-    float d = length(uTrail[i] * ar - aspectUV);
-    float a = (1.0 - smoothstep(0.0, uLightRadius, d)) * uTrailStr[i];
-    cursorAtten = max(cursorAtten, a);
-  }
-  cursorAtten = clamp(cursorAtten * uHover, 0.0, 1.0);
+  // Light falls off with distance from the cursor, and fades with hover
+  float cursorAtten = (1.0 - smoothstep(0.0, uLightRadius, lightDist)) * uHover;
+  cursorAtten = clamp(cursorAtten, 0.0, 1.0);
 
   float effCursorDiff    = cursorDiff * uLightIntensity * cursorAtten;
   float effCursorSpec    = cursorSpec * uSpecular * cursorAtten;
@@ -169,11 +157,7 @@ const DEFAULTS = {
   lightColor: [1, 1, 1],
   normalStrength: 1.0,    // used only when auto-generating the normal map
   fadeSpeed: 6,           // hover fade in/out speed
-  trailFade: 1.6,         // trail decay rate /s (higher = shorter, faster-fading trail)
-  trailSpacing: 0.018,    // min cursor travel (0..1) before dropping a new trail dot
 };
-
-const TRAIL_MAX = 32;     // must match TRAIL_MAX in the fragment shader
 
 class MetallicFacade {
   constructor(container, options = {}) {
@@ -193,9 +177,6 @@ class MetallicFacade {
 
     this.cursor = { x: 0.5, y: 0.5 };
     this.targetCursor = { x: 0.5, y: 0.5 };
-    this.trail = [];                              // recent cursor samples {x,y,str}
-    this._trailPos = new Float32Array(TRAIL_MAX * 2);
-    this._trailStr = new Float32Array(TRAIL_MAX);
     this.hover = 0;
     this.targetHover = 0;
     this.aspect = 1;
@@ -244,10 +225,8 @@ class MetallicFacade {
       'uCursorPos', 'uAspectRatio', 'uHover',
       'uLightColor', 'uLightIntensity', 'uAmbientLight', 'uCursorAmbient',
       'uLightRadius', 'uSpecular', 'uMetallic', 'uCursorLightAngle',
-      'uCursorDirFollowsCursor', 'uTrailCount',
+      'uCursorDirFollowsCursor',
     ].forEach(n => this.u[n] = gl.getUniformLocation(prog, n));
-    this.u.uTrail = gl.getUniformLocation(prog, 'uTrail[0]');
-    this.u.uTrailStr = gl.getUniformLocation(prog, 'uTrailStr[0]');
   }
 
   _placeholderTexture(rgba) {
@@ -391,28 +370,8 @@ class MetallicFacade {
     this.cursor.x += (this.targetCursor.x - this.cursor.x) * k;
     this.cursor.y += (this.targetCursor.y - this.cursor.y) * k;
     this.hover += (this.targetHover - this.hover) * k;
-    this._updateTrail(dt);
     this._render();
     requestAnimationFrame(this._loop);
-  }
-
-  // Maintain a list of recent cursor positions whose strength decays over time.
-  // The shader unions them, so the revealed area trails behind the cursor.
-  _updateTrail(dt) {
-    const decay = Math.exp(-this.cfg.trailFade * dt);
-    const tr = this.trail;
-    for (let i = 0; i < tr.length; i++) tr[i].str *= decay;
-
-    const cx = this.cursor.x, cy = this.cursor.y;
-    const last = tr[tr.length - 1];
-    if (!last || Math.hypot(cx - last.x, cy - last.y) >= this.cfg.trailSpacing) {
-      tr.push({ x: cx, y: cy, str: 1 });        // drop a fresh dot on the path
-    } else {
-      last.x = cx; last.y = cy; last.str = 1;   // keep the head under the cursor fresh
-    }
-
-    while (tr.length && tr[0].str < 0.01) tr.shift();   // retire faded dots
-    while (tr.length > TRAIL_MAX) tr.shift();            // hard cap
   }
 
   _render() {
@@ -444,16 +403,6 @@ class MetallicFacade {
     gl.uniform1f(u.uMetallic, c.metallic);
     gl.uniform1f(u.uCursorLightAngle, c.cursorLightAngle * Math.PI / 180);
     gl.uniform1f(u.uCursorDirFollowsCursor, c.cursorDirFollowsCursor);
-
-    const n = this.trail.length;
-    for (let i = 0; i < n; i++) {
-      this._trailPos[i * 2]     = this.trail[i].x;
-      this._trailPos[i * 2 + 1] = this.trail[i].y;
-      this._trailStr[i]         = this.trail[i].str;
-    }
-    gl.uniform1i(u.uTrailCount, n);
-    gl.uniform2fv(u.uTrail, this._trailPos);
-    gl.uniform1fv(u.uTrailStr, this._trailStr);
 
     gl.drawArrays(gl.TRIANGLES, 0, 3);
   }
