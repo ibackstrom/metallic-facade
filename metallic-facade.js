@@ -163,7 +163,7 @@ uniform vec2  uCursorPos;     // 0..1, y up
 uniform float uAspectRatio;
 uniform float uRadius;        // brush radius
 uniform float uFeather;       // 0..1 soft edge
-uniform float uDecay;         // per-frame multiplier (<1 = fade back to white)
+uniform float uFade;          // amount to subtract this frame (linear -> reaches 0)
 uniform float uBrush;         // brush strength 0..1
 uniform float uActive;        // 1 while painting, 0 otherwise
 in vec2 vUv;
@@ -171,11 +171,13 @@ out vec4 fragColor;
 void main() {
   vec2 ar = vec2(uAspectRatio, 1.0);
   float prev = texture(uPrev, vUv).r;
-  float decayed = prev * uDecay;
+  // Linear fade so painted areas always return fully to white (0). A pure
+  // multiply stalls at the 8-bit quantization floor and leaves a gray ghost.
+  float faded = max(prev - uFade, 0.0);
   float d = length(uCursorPos * ar - vUv * ar);
   float featherStart = uRadius * (1.0 - uFeather);
   float brush = (1.0 - smoothstep(featherStart, uRadius, d)) * uBrush * uActive;
-  float v = clamp(max(decayed, brush), 0.0, 1.0);
+  float v = clamp(max(faded, brush), 0.0, 1.0);
   fragColor = vec4(v, v, v, 1.0);
 }`;
 const ACC_FRAG1 = ACC_FRAG
@@ -203,7 +205,7 @@ const DEFAULTS = {
   fadeSpeed: 6,           // hover fade in/out speed
   feather: 0.7,          // mask edge softness (0 = hard edge, 1 = fades from center)
   metalContrast: 1.5,     // contrast boost inside the revealed metal (1 = none)
-  paintFade: 0.45,        // how fast painted areas fade back to white (per second)
+  paintFade: 0.2,        // how fast painted areas fade back to white (per second)
   brushStrength: 1.0,     // how strongly the cursor paints (0..1)
 };
 
@@ -284,7 +286,7 @@ class MetallicFacade {
     this.au = {};
     [
       'uPrev', 'uCursorPos', 'uAspectRatio', 'uRadius', 'uFeather',
-      'uDecay', 'uBrush', 'uActive',
+      'uFade', 'uBrush', 'uActive',
     ].forEach(n => this.au[n] = gl.getUniformLocation(this.accProg, n));
 
     this._initPaintBuffers();
@@ -463,7 +465,8 @@ class MetallicFacade {
     this.cursor.x += (this.targetCursor.x - this.cursor.x) * k;
     this.cursor.y += (this.targetCursor.y - this.cursor.y) * k;
     this.hover += (this.targetHover - this.hover) * k;
-    this._paintDecay = Math.exp(-this.cfg.paintFade * dt);
+    // Linear fade rate: painted areas fully clear in ~1/paintFade seconds.
+    this._paintFade = this.cfg.paintFade * dt;
     this._paintPass();
     this._render();
     requestAnimationFrame(this._loop);
@@ -488,7 +491,7 @@ class MetallicFacade {
     gl.uniform1f(au.uAspectRatio, this.aspect || 1);
     gl.uniform1f(au.uRadius, c.lightRadius);
     gl.uniform1f(au.uFeather, c.feather);
-    gl.uniform1f(au.uDecay, this._paintDecay);
+    gl.uniform1f(au.uFade, this._paintFade);
     gl.uniform1f(au.uBrush, c.brushStrength);
     gl.uniform1f(au.uActive, this.targetHover);
 
