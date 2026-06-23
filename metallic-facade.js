@@ -35,6 +35,7 @@ uniform sampler2D uBaseTexture;
 uniform sampler2D uNormalMap;
 uniform sampler2D uRoughnessMap;     // r = roughness (0 mirror .. 1 matte)
 uniform sampler2D uDispMap;          // r = height (0 recess .. 1 peak)
+uniform sampler2D uMask;             // r = painted reveal amount (0..1)
 
 uniform vec2  uCursorPos;            // 0..1, y up
 uniform float uAspectRatio;
@@ -84,11 +85,9 @@ void main() {
   float cursorSpec    = pow(max(dot(normal, halfVec), 0.0), 64.0);
   float cursorSpecMtl = pow(max(dot(normal, halfVec), 0.0), 16.0);
 
-  // Reveal mask: solid inside, with a narrow feathered edge near the radius.
-  // uFeather (0..1) sets how much of the radius is the soft band.
-  float featherStart = uLightRadius * (1.0 - uFeather);
-  float cursorAtten = (1.0 - smoothstep(featherStart, uLightRadius, lightDist)) * uHover;
-  cursorAtten = clamp(cursorAtten, 0.0, 1.0);
+  // Reveal amount comes from the persistent paint buffer (painted by the
+  // cursor, slowly decaying back to white over time).
+  float cursorAtten = clamp(texture(uMask, vUv).r, 0.0, 1.0);
 
   float effCursorDiff    = cursorDiff * uLightIntensity * cursorAtten;
   float effCursorSpec    = cursorSpec * uSpecular * cursorAtten;
@@ -155,6 +154,37 @@ const FRAG1 = FRAG
   .replace(/\btexture\(/g, 'texture2D(')
   .replace(/fragColor/g, 'gl_FragColor');
 
+// Paint accumulation pass: reads the previous paint buffer, decays it a bit,
+// and stamps a soft brush at the cursor. Run every frame into a ping-pong FBO.
+const ACC_FRAG = `#version 300 es
+precision highp float;
+uniform sampler2D uPrev;
+uniform vec2  uCursorPos;     // 0..1, y up
+uniform float uAspectRatio;
+uniform float uRadius;        // brush radius
+uniform float uFeather;       // 0..1 soft edge
+uniform float uDecay;         // per-frame multiplier (<1 = fade back to white)
+uniform float uBrush;         // brush strength 0..1
+uniform float uActive;        // 1 while painting, 0 otherwise
+in vec2 vUv;
+out vec4 fragColor;
+void main() {
+  vec2 ar = vec2(uAspectRatio, 1.0);
+  float prev = texture(uPrev, vUv).r;
+  float decayed = prev * uDecay;
+  float d = length(uCursorPos * ar - vUv * ar);
+  float featherStart = uRadius * (1.0 - uFeather);
+  float brush = (1.0 - smoothstep(featherStart, uRadius, d)) * uBrush * uActive;
+  float v = clamp(max(decayed, brush), 0.0, 1.0);
+  fragColor = vec4(v, v, v, 1.0);
+}`;
+const ACC_FRAG1 = ACC_FRAG
+  .replace('#version 300 es\n', '')
+  .replace('out vec4 fragColor;', '')
+  .replace(/\bin vec2 vUv;/, 'varying vec2 vUv;')
+  .replace(/\btexture\(/g, 'texture2D(')
+  .replace(/fragColor/g, 'gl_FragColor');
+
 const DEFAULTS = {
   image: null,
   normalMap: null,        // if null, generated from the image
@@ -171,8 +201,10 @@ const DEFAULTS = {
   lightColor: [1, 1, 1],
   normalStrength: 1.0,    // used only when auto-generating the normal map
   fadeSpeed: 6,           // hover fade in/out speed
-  feather: 0.35,          // mask edge softness (0 = hard edge, 1 = fades from center)
+  feather: 0.7,          // mask edge softness (0 = hard edge, 1 = fades from center)
   metalContrast: 1.5,     // contrast boost inside the revealed metal (1 = none)
+  paintFade: 0.45,        // how fast painted areas fade back to white (per second)
+  brushStrength: 1.0,     // how strongly the cursor paints (0..1)
 };
 
 class MetallicFacade {
@@ -216,33 +248,78 @@ class MetallicFacade {
     return s;
   }
 
-  _initGL() {
+  _link(vsrc, fsrc) {
     const gl = this.gl;
     const prog = gl.createProgram();
-    gl.attachShader(prog, this._compile(gl.VERTEX_SHADER, this.isGL2 ? VERT : VERT1));
-    gl.attachShader(prog, this._compile(gl.FRAGMENT_SHADER, this.isGL2 ? FRAG : FRAG1));
+    gl.attachShader(prog, this._compile(gl.VERTEX_SHADER, vsrc));
+    gl.attachShader(prog, this._compile(gl.FRAGMENT_SHADER, fsrc));
+    gl.bindAttribLocation(prog, 0, 'position');   // keep 'position' at index 0
     gl.linkProgram(prog);
     if (!gl.getProgramParameter(prog, gl.LINK_STATUS))
       throw gl.getProgramInfoLog(prog);
-    gl.useProgram(prog);
-    this.prog = prog;
+    return prog;
+  }
+
+  _initGL() {
+    const gl = this.gl;
+    this.prog = this._link(this.isGL2 ? VERT : VERT1, this.isGL2 ? FRAG : FRAG1);
+    this.accProg = this._link(this.isGL2 ? VERT : VERT1, this.isGL2 ? ACC_FRAG : ACC_FRAG1);
 
     const buf = gl.createBuffer();
     gl.bindBuffer(gl.ARRAY_BUFFER, buf);
     gl.bufferData(gl.ARRAY_BUFFER,
       new Float32Array([-1, -1, 3, -1, -1, 3]), gl.STATIC_DRAW);
-    const loc = gl.getAttribLocation(prog, 'position');
-    gl.enableVertexAttribArray(loc);
-    gl.vertexAttribPointer(loc, 2, gl.FLOAT, false, 0, 0);
+    gl.enableVertexAttribArray(0);                // 'position' is at index 0 in both
+    gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
 
     this.u = {};
     [
-      'uBaseTexture', 'uNormalMap', 'uRoughnessMap', 'uDispMap',
+      'uBaseTexture', 'uNormalMap', 'uRoughnessMap', 'uDispMap', 'uMask',
       'uCursorPos', 'uAspectRatio', 'uHover',
       'uLightColor', 'uLightIntensity', 'uAmbientLight', 'uCursorAmbient',
       'uLightRadius', 'uSpecular', 'uMetallic', 'uCursorLightAngle',
       'uCursorDirFollowsCursor', 'uFeather', 'uMetalContrast',
-    ].forEach(n => this.u[n] = gl.getUniformLocation(prog, n));
+    ].forEach(n => this.u[n] = gl.getUniformLocation(this.prog, n));
+
+    this.au = {};
+    [
+      'uPrev', 'uCursorPos', 'uAspectRatio', 'uRadius', 'uFeather',
+      'uDecay', 'uBrush', 'uActive',
+    ].forEach(n => this.au[n] = gl.getUniformLocation(this.accProg, n));
+
+    this._initPaintBuffers();
+  }
+
+  // Two single-channel paint textures (ping-pong) + an FBO to render between
+  // them. Fixed resolution so it is independent of canvas size / resize.
+  _initPaintBuffers() {
+    const gl = this.gl;
+    this.MASK_SIZE = 1024;
+    this.maskTex = [this._makeMaskTex(), this._makeMaskTex()];
+    this.maskIdx = 0;
+    this.maskFBO = gl.createFramebuffer();
+    // clear both to 0 (fully white / un-revealed)
+    for (let i = 0; i < 2; i++) {
+      gl.bindFramebuffer(gl.FRAMEBUFFER, this.maskFBO);
+      gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0,
+        gl.TEXTURE_2D, this.maskTex[i], 0);
+      gl.clearColor(0, 0, 0, 1);
+      gl.clear(gl.COLOR_BUFFER_BIT);
+    }
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+  }
+
+  _makeMaskTex() {
+    const gl = this.gl;
+    const t = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D, t);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, this.MASK_SIZE, this.MASK_SIZE, 0,
+      gl.RGBA, gl.UNSIGNED_BYTE, null);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+    return t;
   }
 
   _placeholderTexture(rgba) {
@@ -386,13 +463,45 @@ class MetallicFacade {
     this.cursor.x += (this.targetCursor.x - this.cursor.x) * k;
     this.cursor.y += (this.targetCursor.y - this.cursor.y) * k;
     this.hover += (this.targetHover - this.hover) * k;
+    this._paintDecay = Math.exp(-this.cfg.paintFade * dt);
+    this._paintPass();
     this._render();
     requestAnimationFrame(this._loop);
+  }
+
+  // Stamp the cursor into the paint buffer and decay the rest a little.
+  _paintPass() {
+    const gl = this.gl, au = this.au, c = this.cfg;
+    const src = this.maskTex[this.maskIdx];
+    const dst = this.maskTex[1 - this.maskIdx];
+
+    gl.useProgram(this.accProg);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, this.maskFBO);
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0,
+      gl.TEXTURE_2D, dst, 0);
+    gl.viewport(0, 0, this.MASK_SIZE, this.MASK_SIZE);
+
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, src);
+    gl.uniform1i(au.uPrev, 0);
+    gl.uniform2f(au.uCursorPos, this.cursor.x, this.cursor.y);
+    gl.uniform1f(au.uAspectRatio, this.aspect || 1);
+    gl.uniform1f(au.uRadius, c.lightRadius);
+    gl.uniform1f(au.uFeather, c.feather);
+    gl.uniform1f(au.uDecay, this._paintDecay);
+    gl.uniform1f(au.uBrush, c.brushStrength);
+    gl.uniform1f(au.uActive, this.targetHover);
+
+    gl.drawArrays(gl.TRIANGLES, 0, 3);
+
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    this.maskIdx = 1 - this.maskIdx;   // dst becomes the current buffer
   }
 
   _render() {
     const gl = this.gl, u = this.u, c = this.cfg;
     gl.useProgram(this.prog);
+    gl.viewport(0, 0, this.canvas.width, this.canvas.height);
 
     gl.activeTexture(gl.TEXTURE0);
     gl.bindTexture(gl.TEXTURE_2D, this.baseTex);
@@ -406,6 +515,9 @@ class MetallicFacade {
     gl.activeTexture(gl.TEXTURE3);
     gl.bindTexture(gl.TEXTURE_2D, this.dispTex);
     gl.uniform1i(u.uDispMap, 3);
+    gl.activeTexture(gl.TEXTURE4);
+    gl.bindTexture(gl.TEXTURE_2D, this.maskTex[this.maskIdx]);
+    gl.uniform1i(u.uMask, 4);
 
     gl.uniform2f(u.uCursorPos, this.cursor.x, this.cursor.y);
     gl.uniform1f(u.uAspectRatio, this.aspect || 1);
